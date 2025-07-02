@@ -1,7 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 
-class RahbariyatBase(BaseModel):
+class RahbariyatOut(BaseModel):
+    id: int
     positions: str
     full_name: str
     qabul_kunlari: str
@@ -12,16 +13,3 @@ class RahbariyatBase(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class RahbariyatCreate(BaseModel):
-    positions: str
-    full_name: str
-    qabul_kunlari: str
-    telefon: str
-    elektron_pochta: str
-    mutahassisligi: str
-
-
-class RahbariyatOut(RahbariyatBase):
-    id: int

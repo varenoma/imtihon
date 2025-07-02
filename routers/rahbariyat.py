@@ -1,14 +1,16 @@
+import os
+import re
+from uuid import uuid4
 from fastapi import APIRouter, Form, UploadFile, File, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from models.rahbariyat import Rahbariyat
 from core.database import get_db
-from auth.dependencies import get_current_admin
-from dotenv import load_dotenv
-from aiofiles import open as aio_open
+from models.rahbariyat import Rahbariyat
 from schemas.rahbariyat import RahbariyatOut
-import os
-from uuid import uuid4
+from auth.dependencies import get_current_admin
+from aiofiles import open as aio_open
+from dotenv import load_dotenv
+from pydantic import BaseModel, EmailStr, validator
 
 router = APIRouter(prefix="/rahbariyat", tags=["Rahbariyat"])
 
@@ -17,6 +19,58 @@ load_dotenv()
 IMAGE_FOLDER = os.getenv("IMAGE_FOLDER", "static/images")
 ALLOWED_IMAGE_TYPES = os.getenv(
     "ALLOWED_IMAGE_TYPES", "image/png,image/jpeg,image/jpg").split(",")
+
+
+class RahbariyatCreate(BaseModel):
+    positions: str
+    full_name: str
+    qabul_kunlari: str
+    telefon: str
+    elektron_pochta: EmailStr
+    mutahassisligi: str
+
+    @validator("positions")
+    def validate_positions(cls, v):
+        if len(v.strip()) < 3:
+            raise ValueError(
+                "Lavozim kamida 3 belgidan iborat bo'lishi kerak. Masalan: 'Direktor'")
+        return v.strip()
+
+    @validator("full_name")
+    def validate_full_name(cls, v):
+        if len(v.strip()) < 3:
+            raise ValueError(
+                "To'liq ism kamida 3 belgidan iborat bo'lishi kerak. Masalan: 'Aliyev Valijon'")
+        return v.strip()
+
+    @validator("qabul_kunlari")
+    def validate_qabul_kunlari(cls, v):
+        if len(v.strip()) < 5:
+            raise ValueError(
+                "Qabul kunlari kamida 5 belgidan iborat bo'lishi kerak. Masalan: 'Dushanba-Juma'")
+        return v.strip()
+
+    @validator("telefon")
+    def validate_telefon(cls, v):
+        pattern = r"^\+998[0-9]{9}$"
+        if not re.match(pattern, v):
+            raise ValueError(
+                "Telefon raqami +998 bilan boshlanishi va 12 belgidan iborat bo'lishi kerak. Masalan: '+998901234567'")
+        return v
+
+    @validator("mutahassisligi")
+    def validate_mutahassisligi(cls, v):
+        if len(v.strip()) < 3:
+            raise ValueError(
+                "Mutaxassislik kamida 3 belgidan iborat bo'lishi kerak. Masalan: 'IT mutaxassisi'")
+        return v.strip()
+
+    @validator("elektron_pochta")
+    def validate_elektron_pochta(cls, v):
+        if not v:
+            raise ValueError(
+                "Elektron pochta bo'sh bo'lmasligi kerak. Masalan: 'example@domain.com'")
+        return v
 
 
 @router.get("/", response_model=list[RahbariyatOut])
@@ -37,30 +91,52 @@ async def create_rahbariyat(
     db: AsyncSession = Depends(get_db),
     current_admin=Depends(get_current_admin)
 ):
+    try:
+        data = RahbariyatCreate(
+            positions=positions,
+            full_name=full_name,
+            qabul_kunlari=qabul_kunlari,
+            telefon=telefon,
+            elektron_pochta=elektron_pochta,
+            mutahassisligi=mutahassisligi
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     if rasm:
         if rasm.content_type not in ALLOWED_IMAGE_TYPES:
             raise HTTPException(
-                400, detail="Faqat PNG, JPG, JPEG ruxsat etiladi.")
+                status_code=400,
+                detail=f"Yaroqsiz fayl turi: {rasm.content_type}. Faqat PNG, JPG, JPEG ruxsat etiladi. Masalan: rasm.jpg"
+            )
         filename = f"{uuid4().hex}_{rasm.filename}"
         file_path = os.path.join(IMAGE_FOLDER, filename)
-        async with aio_open(file_path, "wb") as f:
-            await f.write(await rasm.read())
-        image_url = f"/static/images/{filename}"
+        try:
+            async with aio_open(file_path, "wb") as f:
+                await f.write(await rasm.read())
+            image_url = f"/static/images/{filename}"
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Rasmni saqlashda xato: {str(e)}")
     else:
         image_url = "/static/images/default.png"
 
     new_person = Rahbariyat(
-        positions=positions,
-        full_name=full_name,
-        qabul_kunlari=qabul_kunlari,
-        telefon=telefon,
-        elektron_pochta=elektron_pochta,
-        mutahassisligi=mutahassisligi,
+        positions=data.positions,
+        full_name=data.full_name,
+        qabul_kunlari=data.qabul_kunlari,
+        telefon=data.telefon,
+        elektron_pochta=data.elektron_pochta,
+        mutahassisligi=data.mutahassisligi,
         rasm=image_url
     )
-    db.add(new_person)
-    await db.commit()
-    await db.refresh(new_person)
+    try:
+        db.add(new_person)
+        await db.commit()
+        await db.refresh(new_person)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Ma'lumotlarni saqlashda xato: {str(e)}")
     return new_person
 
 
@@ -77,35 +153,60 @@ async def update_rahbariyat(
     db: AsyncSession = Depends(get_db),
     current_admin=Depends(get_current_admin)
 ):
+    try:
+        data = RahbariyatCreate(
+            positions=positions,
+            full_name=full_name,
+            qabul_kunlari=qabul_kunlari,
+            telefon=telefon,
+            elektron_pochta=elektron_pochta,
+            mutahassisligi=mutahassisligi
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     result = await db.execute(select(Rahbariyat).where(Rahbariyat.id == id))
     person = result.scalar_one_or_none()
     if not person:
-        raise HTTPException(404, detail="Topilmadi")
+        raise HTTPException(status_code=404, detail="Ma'lumot topilmadi")
 
     if rasm:
         if rasm.content_type not in ALLOWED_IMAGE_TYPES:
             raise HTTPException(
-                400, detail="Faqat PNG, JPG, JPEG ruxsat etiladi.")
-
+                status_code=400,
+                detail=f"Yaroqsiz fayl turi: {rasm.content_type}. Faqat PNG, JPG, JPEG ruxsat etiladi. Masalan: rasm.jpg"
+            )
         old_path = person.rasm.lstrip("/")
         if os.path.exists(old_path) and "default.png" not in old_path:
-            os.remove(old_path)
+            try:
+                os.remove(old_path)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500, detail=f"Eski rasmni o'chirishda xato: {str(e)}")
 
         filename = f"{uuid4().hex}_{rasm.filename}"
         file_path = os.path.join(IMAGE_FOLDER, filename)
-        async with aio_open(file_path, "wb") as f:
-            await f.write(await rasm.read())
-        person.rasm = f"/static/images/{filename}"
+        try:
+            async with aio_open(file_path, "wb") as f:
+                await f.write(await rasm.read())
+            person.rasm = f"/static/images/{filename}"
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Rasmni saqlashda xato: {str(e)}")
 
-    person.positions = positions
-    person.full_name = full_name
-    person.qabul_kunlari = qabul_kunlari
-    person.telefon = telefon
-    person.elektron_pochta = elektron_pochta
-    person.mutahassisligi = mutahassisligi
+    person.positions = data.positions
+    person.full_name = data.full_name
+    person.qabul_kunlari = data.qabul_kunlari
+    person.telefon = data.telefon
+    person.elektron_pochta = data.elektron_pochta
+    person.mutahassisligi = data.mutahassisligi
 
-    await db.commit()
-    await db.refresh(person)
+    try:
+        await db.commit()
+        await db.refresh(person)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Ma'lumotlarni yangilashda xato: {str(e)}")
     return person
 
 
@@ -118,13 +219,21 @@ async def delete_rahbariyat(
     result = await db.execute(select(Rahbariyat).where(Rahbariyat.id == id))
     person = result.scalar_one_or_none()
     if not person:
-        raise HTTPException(404, detail="Topilmadi")
+        raise HTTPException(status_code=404, detail="Ma'lumot topilmadi")
 
     if person.rasm and "default.png" not in person.rasm:
         old_path = person.rasm.lstrip("/")
         if os.path.exists(old_path):
-            os.remove(old_path)
+            try:
+                os.remove(old_path)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500, detail=f"Rasmni o'chirishda xato: {str(e)}")
 
-    await db.delete(person)
-    await db.commit()
-    return {"message": "O'chirildi"}
+    try:
+        await db.delete(person)
+        await db.commit()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Ma'lumotlarni o'chirishda xato: {str(e)}")
+    return {"message": "Muvaffaqiyatli o'chirildi"}
