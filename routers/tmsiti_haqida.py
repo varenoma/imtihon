@@ -26,11 +26,10 @@ async def get_all(db: AsyncSession = Depends(get_db)):
 @router.post("/for_admin/", response_model=TmsitiHaqidaOut)
 async def create(
     text: str = Form(...),
-    pdf: UploadFile = File(...),  # ✅ Swaggerda chiqadi
+    pdf: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_admin=Depends(get_current_admin)
 ):
-    # Fayl turini tekshirish
     allowed_types = ["application/pdf", "image/png", "image/jpeg"]
     if pdf.content_type not in allowed_types:
         raise HTTPException(
@@ -55,7 +54,7 @@ async def create(
 async def update(
     id: int,
     text: str = Form(...),
-    pdf: UploadFile = File(None),  # ✅ Swaggerda ko‘rinadi, ixtiyoriy
+    pdf: UploadFile = File(None),
     db: AsyncSession = Depends(get_db),
     current_admin=Depends(get_current_admin)
 ):
@@ -65,7 +64,6 @@ async def update(
         raise HTTPException(404, detail="Topilmadi")
 
     if pdf:
-        # ✅ Fayl turi tekshiriladi
         allowed_types = ["application/pdf", "image/png", "image/jpeg"]
         if pdf.content_type not in allowed_types:
             raise HTTPException(
@@ -73,19 +71,16 @@ async def update(
                 detail=f"Yaroqsiz fayl turi: {pdf.content_type}. Faqat PDF, PNG, JPG, JPEG ruxsat etiladi"
             )
 
-        # Eski faylni o'chiramiz
         old_path = row.pdf.lstrip("/")
         if os.path.exists(old_path):
             os.remove(old_path)
 
-        # Yangi faylni saqlaymiz
         filename = f"{uuid4().hex}_{pdf.filename}"
         path = os.path.join(PDF_FOLDER, filename)
         async with aio_open(path, "wb") as f:
             await f.write(await pdf.read())
         row.pdf = f"/static/pdfs/{filename}"
 
-    # Matn yangilanadi
     row.text = text
     await db.commit()
     await db.refresh(row)
@@ -110,4 +105,4 @@ async def delete(
 
     await db.delete(row)
     await db.commit()
-    return {"message": "O‘chirildi"}
+    return {"message": "O'chirildi"}
