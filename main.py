@@ -2,7 +2,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi import FastAPI
 from core.database import Base, engine
 
-from routers import admin_auth, tmsiti_haqida, rahbariyat, tashkil_tuzilma, tarkibiy_bolinma
+from routers import admin_auth, tmsiti_haqida, rahbariyat, tashkil_tuzilma, tarkibiy_bolinma, vakansiya
 
 app = FastAPI()
 
@@ -20,3 +20,4 @@ app.include_router(tmsiti_haqida.router)
 app.include_router(rahbariyat.router)
 app.include_router(tashkil_tuzilma.router)
 app.include_router(tarkibiy_bolinma.router)
+app.include_router(vakansiya.router)
