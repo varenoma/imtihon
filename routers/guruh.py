@@ -8,11 +8,11 @@ from sqlalchemy.orm import joinedload
 from core.database import get_db
 from models.guruh import Guruh
 from models.shaharsozlik_norma_qoida_bolim import ShaharsozlikNormaQoidaBolim
-from schemas.guruh import GuruhOut
+from models.tizim import Tizim
+from schemas.guruh import GuruhCreate, GuruhOut
 from auth.dependencies import get_current_admin
 from aiofiles import open as aio_open
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, validator, HttpUrl
 
 router = APIRouter(prefix="/guruhlar", tags=["Guruhlar"])
 
@@ -22,39 +22,11 @@ PDF_FOLDER = os.getenv("PDF_FOLDER", "static/pdfs")
 ALLOWED_FILE_TYPES = ["application/pdf"]
 
 
-class GuruhCreate(BaseModel):
-    shifr: str = Field(..., min_length=3,
-                       description="Shifr, kamida 3 belgi. Masalan: 'ABC-123'")
-    hujjat_nomi: str = Field(..., min_length=5,
-                             description="Hujjat nomi, kamida 5 belgi. Masalan: 'Shaharsozlik qoidasi'")
-    link: str | None = Field(
-        None, description="Hujjat linki, to'g'ri URL formati. Masalan: 'https://example.com'")
-    pdf: str | None = Field(
-        None, description="PDF fayl yo'li. Masalan: '/static/pdfs/document.pdf'")
-    bolim: int = Field(...,
-                       description="Shaharsozlik norma qoida bo'limi ID'si. Masalan: 1")
-
-    @validator("shifr")
-    def validate_shifr(cls, v):
-        return v.strip()
-
-    @validator("hujjat_nomi")
-    def validate_hujjat_nomi(cls, v):
-        return v.strip()
-
-    @validator("link")
-    def validate_link(cls, v):
-        if v and not re.match(r"^https?://", v):
-            raise ValueError(
-                "Link to'g'ri URL bo'lishi kerak. Masalan: 'https://example.com'")
-        return v
-
-
 @router.get(
     "/",
     response_model=list[GuruhOut],
     summary="Barcha guruhlarni olish",
-    description="Barcha guruhlarni yoki ma'lum bir bo'limga tegishli guruhlarni sahifalarga bo'lib olish. Limit, offset va ixtiyoriy bo'lim parametri yordamida so'rovni boshqarish mumkin. Har bir guruh bo'lim ma'lumotlari bilan qaytariladi.",
+    description="Barcha guruhlarni yoki ma'lum bir tizim yoki bo'limga tegishli guruhlarni sahifalarga bo'lib olish. Limit, offset, tizim va ixtiyoriy bo'lim parametri yordamida so'rovni boshqarish mumkin. Har bir guruh bo'lim ma'lumotlari bilan qaytariladi.",
     response_description="Guruhlar ro'yxati, har birida id, shifr, hujjat nomi, link, PDF yo'li va bo'lim ma'lumotlari."
 )
 async def get_all(
@@ -64,9 +36,19 @@ async def get_all(
     offset: int = Query(
         0, ge=0, description="Qaysi yozuvdan boshlash (0 yoki undan katta). Masalan: 0"),
     bolim: int | None = Query(
-        None, description="Bo'lim ID'si bo'yicha filtr. Masalan: 1. Agar berilmasa, barcha guruhlar qaytariladi.")
+        None, description="Bo'lim ID'si bo'yicha filtr. Masalan: 1. Agar berilmasa, barcha guruhlar qaytariladi."),
+    tizim: int | None = Query(
+        None, description="Tizim ID'si bo'yicha filtr. Masalan: 1. Agar berilmasa, barcha guruhlar qaytariladi.")
 ):
     try:
+        # Tizim mavjudligini tekshirish, agar berilgan bo'lsa
+        if tizim is not None:
+            result = await db.execute(select(Tizim).where(Tizim.id == tizim))
+            tizim_obj = result.scalar_one_or_none()
+            if not tizim_obj:
+                raise HTTPException(
+                    status_code=404, detail=f"Tizim ID'si {tizim} topilmadi")
+
         # Bo'lim mavjudligini tekshirish, agar berilgan bo'lsa
         if bolim is not None:
             result = await db.execute(select(ShaharsozlikNormaQoidaBolim).where(ShaharsozlikNormaQoidaBolim.id == bolim))
@@ -74,12 +56,21 @@ async def get_all(
             if not bolim_obj:
                 raise HTTPException(
                     status_code=404, detail=f"Bo'lim ID'si {bolim} topilmadi")
+            # Agar tizim va bolim ikkalasi ham berilgan bo'lsa, ularning mosligini tekshirish
+            if tizim is not None and bolim_obj.tizim != tizim:
+                raise HTTPException(
+                    status_code=400, detail=f"Bo'lim ID'si {bolim} tizim ID'si {tizim} ga tegishli emas")
 
         # Guruhlar so'rovi
-        query = select(Guruh).options(joinedload(Guruh.bolim_obj)).offset(
-            offset).limit(limit).order_by(Guruh.id)
+        query = select(Guruh).options(
+            joinedload(Guruh.bolim_obj).joinedload(
+                ShaharsozlikNormaQoidaBolim.tizim_obj)
+        ).offset(offset).limit(limit).order_by(Guruh.id)
         if bolim is not None:
             query = query.where(Guruh.bolim == bolim)
+        if tizim is not None:
+            query = query.join(ShaharsozlikNormaQoidaBolim, Guruh.bolim == ShaharsozlikNormaQoidaBolim.id).where(
+                ShaharsozlikNormaQoidaBolim.tizim == tizim)
 
         result = await db.execute(query)
         return result.scalars().all()
@@ -121,7 +112,7 @@ async def create_guruh(
         raise HTTPException(status_code=404, detail="Bo'lim topilmadi")
 
     # PDF yuklash
-    pdf_url = None  # Sukut qiymat sifatida None
+    pdf_url = None
     if pdf:
         if pdf.content_type != "application/pdf":
             raise HTTPException(
@@ -150,10 +141,10 @@ async def create_guruh(
         db.add(new_guruh)
         await db.commit()
         await db.refresh(new_guruh)
-        # Explicitly load bolim_obj after refresh
+        # Explicitly load bolim_obj and tizim_obj after refresh
         result = await db.execute(
             select(Guruh)
-            .options(joinedload(Guruh.bolim_obj))
+            .options(joinedload(Guruh.bolim_obj).joinedload(ShaharsozlikNormaQoidaBolim.tizim_obj))
             .where(Guruh.id == new_guruh.id)
         )
         new_guruh = result.scalar_one()
@@ -228,7 +219,6 @@ async def update_guruh(
             raise HTTPException(
                 status_code=500, detail=f"PDFni saqlashda xato: {str(e)}")
     else:
-        # Agar PDF kiritilmasa, pdf maydoni NULL qilinadi
         old_path = guruh.pdf.lstrip("/") if guruh.pdf else None
         if old_path and os.path.exists(old_path):
             try:
@@ -246,10 +236,10 @@ async def update_guruh(
     try:
         await db.commit()
         await db.refresh(guruh)
-        # Explicitly load bolim_obj after refresh
+        # Explicitly load bolim_obj and tizim_obj after refresh
         result = await db.execute(
             select(Guruh)
-            .options(joinedload(Guruh.bolim_obj))
+            .options(joinedload(Guruh.bolim_obj).joinedload(ShaharsozlikNormaQoidaBolim.tizim_obj))
             .where(Guruh.id == guruh.id)
         )
         guruh = result.scalar_one()
