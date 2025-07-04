@@ -3,7 +3,9 @@ from fastapi import FastAPI
 from core.database import Base, engine
 
 from routers import (admin_auth, tmsiti_haqida, rahbariyat, tashkil_tuzilma,
-                     tarkibiy_bolinma, vakansiya, qonun_qaror_farmon, tizim, shaharsozlik_norma_qoida_bolim, guruh, full_tizim, standart)
+                     tarkibiy_bolinma, vakansiya, qonun_qaror_farmon, tizim,
+                     shaharsozlik_norma_qoida_bolim, guruh, full_tizim,
+                     standart, reglament)
 
 app = FastAPI()
 
@@ -28,3 +30,4 @@ app.include_router(tizim.router)
 app.include_router(shaharsozlik_norma_qoida_bolim.router)
 app.include_router(guruh.router)
 app.include_router(standart.router)
+app.include_router(reglament.router)
