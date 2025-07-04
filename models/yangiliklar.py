@@ -10,4 +10,5 @@ class Yangilik(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     text = Column(Text)
+    rasm = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
