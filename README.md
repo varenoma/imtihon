@@ -5,6 +5,13 @@
 
 ---
 
+## Docker
+
+docker pull varenoma/imtihon </br>
+docker run -p 8000:8000 varenoma/imtihon
+
+---
+
 ## 🗂️ Ma'lumotlar Bazasi Diagrammasi
 
 Quyida TMSITI loyihasining to‘liq ma’lumotlar bazasi struktura diagrammasi keltirilgan.  
