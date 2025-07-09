@@ -1,4 +1,4 @@
-# 🏛️ TMSITI - Ma'lumotlar Portali (Docker + FastAPI)
+# 🏛️ TMSITI
 
 ## 🚀 Deploy Sayt Linki
 👉 [Swagger Docs](https://imtihon-c1ua.onrender.com/docs)
